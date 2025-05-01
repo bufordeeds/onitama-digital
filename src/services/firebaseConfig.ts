@@ -2,18 +2,19 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getDatabase } from 'firebase/database';
+import Constants from 'expo-constants';
 
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-	apiKey: 'AIzaSyCH-Ttb4BcS7lA-_9t7JNpCVESP-YLzAgw',
-	authDomain: 'onitama-digital.firebaseapp.com',
-	databaseURL: 'https://onitama-digital-default-rtdb.firebaseio.com',
-	projectId: 'onitama-digital',
-	storageBucket: 'onitama-digital.firebasestorage.app',
-	messagingSenderId: '1075496089760',
-	appId: '1:1075496089760:web:449489a032f82f7f02f1c5',
-	measurementId: 'G-F6RLQCFVPF'
+	apiKey: Constants.expoConfig?.extra?.firebaseApiKey,
+	authDomain: Constants.expoConfig?.extra?.firebaseAuthDomain,
+	databaseURL: Constants.expoConfig?.extra?.firebaseDatabaseURL,
+	projectId: Constants.expoConfig?.extra?.firebaseProjectId,
+	storageBucket: Constants.expoConfig?.extra?.firebaseStorageBucket,
+	messagingSenderId: Constants.expoConfig?.extra?.firebaseMessagingSenderId,
+	appId: Constants.expoConfig?.extra?.firebaseAppId,
+	measurementId: Constants.expoConfig?.extra?.firebaseMeasurementId
 };
 
 // Initialize Firebase
