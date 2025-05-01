@@ -4,6 +4,16 @@ All notable changes to the Onitama Digital project will be documented in this fi
 
 ## [Unreleased]
 
+### Added
+
+-   Firebase integration for online multiplayer
+    -   User authentication (email/password)
+    -   Firestore for game rooms and user profiles
+    -   Realtime Database for game state synchronization
+    -   Security rules for data protection
+-   Online context provider for managing online game state
+-   Services for Firebase interactions (auth, firestore, realtime)
+
 ## [0.1.1] - 2025-04-30
 
 ### Fixed

@@ -7,11 +7,16 @@ import React, {
 } from 'react';
 import { GameState, User, GameRoom } from '../types';
 import { initializeGame } from '../logic/gameState';
+import { User as FirebaseUser } from 'firebase/auth';
+import * as AuthService from '../services/auth';
+import * as FirestoreService from '../services/firestore';
+import * as RealtimeService from '../services/realtime';
 
 // Define the context value type
 interface OnlineContextValue {
 	// Authentication
 	currentUser: User | null;
+	firebaseUser: FirebaseUser | null;
 	isAuthenticated: boolean;
 	isLoading: boolean;
 	signIn: (email: string, password: string) => Promise<void>;
@@ -28,9 +33,11 @@ interface OnlineContextValue {
 	createRoom: (name: string, isPrivate: boolean) => Promise<string>;
 	joinRoom: (roomId: string, joinCode?: string) => Promise<void>;
 	leaveRoom: () => Promise<void>;
+	joinRoomWithCode: (joinCode: string) => Promise<void>;
 
 	// Game state
 	updateGameState: (gameState: GameState) => Promise<void>;
+	updateGameStateField: (field: string, value: any) => Promise<void>;
 }
 
 // Create the context
@@ -43,6 +50,7 @@ interface OnlineProviderProps {
 
 export const OnlineProvider: React.FC<OnlineProviderProps> = ({ children }) => {
 	// Authentication state
+	const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
 	const [currentUser, setCurrentUser] = useState<User | null>(null);
 	const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 	const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -51,23 +59,17 @@ export const OnlineProvider: React.FC<OnlineProviderProps> = ({ children }) => {
 	const [rooms, setRooms] = useState<GameRoom[]>([]);
 	const [currentRoom, setCurrentRoom] = useState<GameRoom | null>(null);
 
-	// Mock authentication functions (to be replaced with Firebase)
+	// Subscriptions cleanup
+	const [unsubscribeGameState, setUnsubscribeGameState] = useState<
+		(() => void) | null
+	>(null);
+
+	// Authentication functions using Firebase
 	const signIn = async (email: string, password: string) => {
 		setIsLoading(true);
 		try {
-			// Mock authentication - in a real app, this would use Firebase Auth
-			const mockUser: User = {
-				id: 'user-123',
-				displayName: email.split('@')[0],
-				stats: {
-					wins: 0,
-					losses: 0,
-					draws: 0
-				}
-			};
-
-			setCurrentUser(mockUser);
-			setIsAuthenticated(true);
+			await AuthService.signIn(email, password);
+			// User state will be updated by the auth state listener
 		} catch (error) {
 			console.error('Sign in error:', error);
 			throw error;
@@ -83,19 +85,23 @@ export const OnlineProvider: React.FC<OnlineProviderProps> = ({ children }) => {
 	) => {
 		setIsLoading(true);
 		try {
-			// Mock sign up - in a real app, this would use Firebase Auth
-			const mockUser: User = {
-				id: 'user-' + Math.floor(Math.random() * 1000),
-				displayName,
-				stats: {
-					wins: 0,
-					losses: 0,
-					draws: 0
-				}
-			};
+			// Create the user account
+			const userCredential = await AuthService.signUp(email, password);
 
-			setCurrentUser(mockUser);
-			setIsAuthenticated(true);
+			if (userCredential.user) {
+				// Create a user profile in Firestore
+				const newUser: User = {
+					id: userCredential.user.uid,
+					displayName,
+					stats: {
+						wins: 0,
+						losses: 0,
+						draws: 0
+					}
+				};
+
+				await FirestoreService.saveUserProfile(newUser);
+			}
 		} catch (error) {
 			console.error('Sign up error:', error);
 			throw error;
@@ -107,10 +113,17 @@ export const OnlineProvider: React.FC<OnlineProviderProps> = ({ children }) => {
 	const signOut = async () => {
 		setIsLoading(true);
 		try {
-			// Mock sign out - in a real app, this would use Firebase Auth
+			// If in a room, leave it first
+			if (currentRoom) {
+				await leaveRoom();
+			}
+
+			// Sign out from Firebase
+			await AuthService.signOut();
+
+			// Clear local state
 			setCurrentUser(null);
 			setIsAuthenticated(false);
-			setCurrentRoom(null);
 		} catch (error) {
 			console.error('Sign out error:', error);
 			throw error;
@@ -119,39 +132,57 @@ export const OnlineProvider: React.FC<OnlineProviderProps> = ({ children }) => {
 		}
 	};
 
-	// Mock room functions (to be replaced with Firebase)
+	// Room functions using Firestore
 	const createRoom = async (name: string, isPrivate: boolean) => {
 		if (!currentUser) {
 			throw new Error('User must be authenticated to create a room');
 		}
 
 		try {
-			// Generate a random join code for private rooms
-			const joinCode = isPrivate
-				? Math.random().toString(36).substring(2, 8).toUpperCase()
-				: undefined;
+			// Create a new game state
+			const initialGameState = initializeGame();
 
-			// Create a new room
-			const roomId = 'room-' + Math.floor(Math.random() * 10000);
-			const newRoom: GameRoom = {
-				id: roomId,
+			// Create the room in Firestore
+			const roomRef = await FirestoreService.createGameRoom(
+				currentUser.id,
 				name,
-				createdBy: currentUser.id,
 				isPrivate,
-				joinCode,
-				players: {
-					blue: currentUser
-				},
-				gameState: initializeGame(),
-				status: 'waiting',
-				lastMoveTime: Date.now()
-			};
+				initialGameState
+			);
 
-			// In a real app, this would save to Firebase
-			setRooms([...rooms, newRoom]);
-			setCurrentRoom(newRoom);
+			// Join the room as the blue player
+			await FirestoreService.joinGameRoom(
+				roomRef.id,
+				currentUser,
+				'blue'
+			);
 
-			return roomId;
+			// Initialize the game state in the realtime database
+			await RealtimeService.updateGameState(roomRef.id, initialGameState);
+
+			// Get the created room
+			const room = await FirestoreService.getGameRoom(roomRef.id);
+
+			if (room) {
+				setCurrentRoom(room);
+
+				// Subscribe to game state changes
+				const unsubscribe = RealtimeService.subscribeToGameState(
+					room.id,
+					(gameState) => {
+						setCurrentRoom((prevRoom) => {
+							if (prevRoom && prevRoom.id === room.id) {
+								return { ...prevRoom, gameState };
+							}
+							return prevRoom;
+						});
+					}
+				);
+
+				setUnsubscribeGameState(() => unsubscribe);
+			}
+
+			return roomRef.id;
 		} catch (error) {
 			console.error('Create room error:', error);
 			throw error;
@@ -164,8 +195,8 @@ export const OnlineProvider: React.FC<OnlineProviderProps> = ({ children }) => {
 		}
 
 		try {
-			// Find the room
-			const room = rooms.find((r) => r.id === roomId);
+			// Get the room from Firestore
+			const room = await FirestoreService.getGameRoom(roomId);
 
 			if (!room) {
 				throw new Error('Room not found');
@@ -176,27 +207,92 @@ export const OnlineProvider: React.FC<OnlineProviderProps> = ({ children }) => {
 				throw new Error('Invalid join code');
 			}
 
-			// Check if the room is full
-			if (room.players.blue && room.players.red) {
+			// Determine which color to join as
+			let color: 'blue' | 'red';
+
+			if (room.players.blue?.id === currentUser.id) {
+				// Already joined as blue
+				color = 'blue';
+			} else if (room.players.red?.id === currentUser.id) {
+				// Already joined as red
+				color = 'red';
+			} else if (!room.players.blue) {
+				// Join as blue if available
+				color = 'blue';
+			} else if (!room.players.red) {
+				// Join as red if available
+				color = 'red';
+			} else {
 				throw new Error('Room is full');
 			}
 
-			// Join as the available color
-			const updatedRoom: GameRoom = {
-				...room,
-				players: {
-					...room.players,
-					red: room.players.blue ? currentUser : room.players.red,
-					blue: room.players.blue || currentUser
-				},
-				status: room.players.blue ? 'playing' : 'waiting'
-			};
+			// Join the room in Firestore
+			if (
+				room.players.blue?.id !== currentUser.id &&
+				room.players.red?.id !== currentUser.id
+			) {
+				await FirestoreService.joinGameRoom(roomId, currentUser, color);
+			}
 
-			// In a real app, this would update Firebase
-			setRooms(rooms.map((r) => (r.id === roomId ? updatedRoom : r)));
-			setCurrentRoom(updatedRoom);
+			// If both players are now in the room, update the status to playing
+			if (
+				(color === 'blue' && room.players.red) ||
+				(color === 'red' && room.players.blue)
+			) {
+				await FirestoreService.updateRoomStatus(roomId, 'playing');
+			}
+
+			// Get the updated room
+			const updatedRoom = await FirestoreService.getGameRoom(roomId);
+
+			if (updatedRoom) {
+				setCurrentRoom(updatedRoom);
+
+				// Subscribe to game state changes
+				const unsubscribe = RealtimeService.subscribeToGameState(
+					updatedRoom.id,
+					(gameState) => {
+						setCurrentRoom((prevRoom) => {
+							if (prevRoom && prevRoom.id === updatedRoom.id) {
+								return { ...prevRoom, gameState };
+							}
+							return prevRoom;
+						});
+					}
+				);
+
+				setUnsubscribeGameState(() => unsubscribe);
+
+				// Update player presence
+				RealtimeService.updatePlayerPresence(
+					roomId,
+					currentUser.id,
+					true
+				);
+			}
 		} catch (error) {
 			console.error('Join room error:', error);
+			throw error;
+		}
+	};
+
+	const joinRoomWithCode = async (joinCode: string) => {
+		if (!currentUser) {
+			throw new Error('User must be authenticated to join a room');
+		}
+
+		try {
+			// Find the room by join code
+			const room = await FirestoreService.getGameRoomByJoinCode(joinCode);
+
+			if (!room) {
+				throw new Error('Room not found');
+			}
+
+			// Join the room
+			await joinRoom(room.id, joinCode);
+		} catch (error) {
+			console.error('Join room with code error:', error);
 			throw error;
 		}
 	};
@@ -207,40 +303,39 @@ export const OnlineProvider: React.FC<OnlineProviderProps> = ({ children }) => {
 		}
 
 		try {
-			// Check if the user is in the room
+			// Unsubscribe from game state changes
+			if (unsubscribeGameState) {
+				unsubscribeGameState();
+				setUnsubscribeGameState(null);
+			}
+
+			// Update player presence
+			await RealtimeService.updatePlayerPresence(
+				currentRoom.id,
+				currentUser.id,
+				false
+			);
+
+			// Leave the room in Firestore
+			await FirestoreService.leaveGameRoom(
+				currentRoom.id,
+				currentUser.id
+			);
+
+			// Check if the user is the last player
 			const isBluePlayer =
 				currentRoom.players.blue?.id === currentUser.id;
 			const isRedPlayer = currentRoom.players.red?.id === currentUser.id;
 
-			if (!isBluePlayer && !isRedPlayer) {
-				return;
-			}
-
-			// If the user is the only player, delete the room
 			if (
 				(isBluePlayer && !currentRoom.players.red) ||
 				(isRedPlayer && !currentRoom.players.blue)
 			) {
-				// In a real app, this would delete from Firebase
-				setRooms(rooms.filter((r) => r.id !== currentRoom.id));
-				setCurrentRoom(null);
-				return;
+				// Clean up the room data in the realtime database
+				await RealtimeService.cleanupRoom(currentRoom.id);
 			}
 
-			// Otherwise, remove the player from the room
-			const updatedRoom: GameRoom = {
-				...currentRoom,
-				players: {
-					blue: isBluePlayer ? undefined : currentRoom.players.blue,
-					red: isRedPlayer ? undefined : currentRoom.players.red
-				},
-				status: 'waiting'
-			};
-
-			// In a real app, this would update Firebase
-			setRooms(
-				rooms.map((r) => (r.id === currentRoom.id ? updatedRoom : r))
-			);
+			// Clear the current room
 			setCurrentRoom(null);
 		} catch (error) {
 			console.error('Leave room error:', error);
@@ -248,51 +343,110 @@ export const OnlineProvider: React.FC<OnlineProviderProps> = ({ children }) => {
 		}
 	};
 
-	// Game state functions
+	// Game state functions using Realtime Database
 	const updateGameState = async (gameState: GameState) => {
 		if (!currentRoom) {
 			throw new Error('Not in a room');
 		}
 
 		try {
-			// Update the room's game state
-			const updatedRoom: GameRoom = {
-				...currentRoom,
-				gameState,
-				lastMoveTime: Date.now()
-			};
+			// Update the game state in the realtime database
+			await RealtimeService.updateGameState(currentRoom.id, gameState);
 
-			// In a real app, this would update Firebase
-			setRooms(
-				rooms.map((r) => (r.id === currentRoom.id ? updatedRoom : r))
-			);
-			setCurrentRoom(updatedRoom);
+			// Update the last move time in Firestore
+			await FirestoreService.updateGameState(currentRoom.id, gameState);
 		} catch (error) {
 			console.error('Update game state error:', error);
 			throw error;
 		}
 	};
 
-	// Simulate loading user from storage on mount
+	const updateGameStateField = async (field: string, value: any) => {
+		if (!currentRoom) {
+			throw new Error('Not in a room');
+		}
+
+		try {
+			// Update a specific field in the game state
+			await RealtimeService.updateGameStateField(
+				currentRoom.id,
+				field,
+				value
+			);
+		} catch (error) {
+			console.error('Update game state field error:', error);
+			throw error;
+		}
+	};
+
+	// Subscribe to auth state changes
 	useEffect(() => {
-		const loadUser = async () => {
+		const unsubscribe = AuthService.subscribeToAuthChanges(async (user) => {
 			setIsLoading(true);
-			try {
-				// In a real app, this would check Firebase Auth state
-				// For now, just set loading to false
-				setIsLoading(false);
-			} catch (error) {
-				console.error('Load user error:', error);
-				setIsLoading(false);
+			setFirebaseUser(user);
+
+			if (user) {
+				try {
+					// Get or create the user profile
+					let userProfile = await FirestoreService.getUserProfile(
+						user.uid
+					);
+
+					if (!userProfile) {
+						// Create a new user profile if it doesn't exist
+						const newUser: User = {
+							id: user.uid,
+							displayName:
+								user.displayName ||
+								user.email?.split('@')[0] ||
+								'User',
+							stats: {
+								wins: 0,
+								losses: 0,
+								draws: 0
+							}
+						};
+
+						await FirestoreService.saveUserProfile(newUser);
+						userProfile = newUser;
+					}
+
+					setCurrentUser(userProfile);
+					setIsAuthenticated(true);
+
+					// Load public rooms
+					const publicRooms =
+						await FirestoreService.getPublicGameRooms();
+					setRooms(publicRooms);
+				} catch (error) {
+					console.error('Error loading user profile:', error);
+				}
+			} else {
+				setCurrentUser(null);
+				setIsAuthenticated(false);
+				setRooms([]);
+				setCurrentRoom(null);
+			}
+
+			setIsLoading(false);
+		});
+
+		return () => unsubscribe();
+	}, []);
+
+	// Cleanup subscriptions when component unmounts
+	useEffect(() => {
+		return () => {
+			if (unsubscribeGameState) {
+				unsubscribeGameState();
 			}
 		};
-
-		loadUser();
-	}, []);
+	}, [unsubscribeGameState]);
 
 	// Create the context value
 	const contextValue: OnlineContextValue = {
 		currentUser,
+		firebaseUser,
 		isAuthenticated,
 		isLoading,
 		signIn,
@@ -303,7 +457,9 @@ export const OnlineProvider: React.FC<OnlineProviderProps> = ({ children }) => {
 		createRoom,
 		joinRoom,
 		leaveRoom,
-		updateGameState
+		joinRoomWithCode,
+		updateGameState,
+		updateGameStateField
 	};
 
 	return (
