@@ -157,9 +157,9 @@ interface GameRoom {
 -   Implement turn-based gameplay
 -   Add player indicators and game status display
 -   Implement move highlighting system
--   Set up Firebase project
--   Configure authentication (email, Google, Apple)
--   Design Firestore database schema
+-   [x] Set up Firebase project
+-   [x] Configure authentication (email/password)
+-   [x] Design Firestore database schema
 
 #### Day 5: Initial Playtest
 
@@ -171,10 +171,10 @@ interface GameRoom {
 
 #### Day 1-2: Online Game Infrastructure
 
--   Implement user authentication flow
--   Create game room creation/joining functionality
--   Build private/public room system with join codes
--   Develop real-time game state synchronization
+-   [x] Implement user authentication flow
+-   [x] Create game room creation/joining functionality
+-   [x] Build private/public room system with join codes
+-   [x] Develop real-time game state synchronization
 
 #### Day 3-4: Touch Controls & Animations
 
@@ -228,14 +228,15 @@ interface GameRoom {
 
 ### State Management
 
--   Use React Context for local game state
--   Use Firebase Realtime Database for online game state synchronization
+-   [x] Use React Context for local game state
+-   [x] Use Firebase Realtime Database for online game state synchronization
 
 ### Authentication & Security
 
--   Implement Firebase Authentication
--   Set up security rules for Firestore
--   Create user profiles and basic stats tracking
+-   [x] Implement Firebase Authentication
+-   [x] Set up security rules for Firestore
+-   [x] Set up security rules for Realtime Database
+-   [x] Create user profiles and basic stats tracking
 
 ### Performance Optimization
 
