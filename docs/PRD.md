@@ -26,7 +26,7 @@
 
 **Success Metrics:**
 
--   95% move accuracy (no invalid moves allowed).
+-   100% move accuracy (no invalid moves allowed, including captures).
 -   <100ms UI response on modern devices.
 -   Beta tester satisfaction ≥4/5 on UX.
 

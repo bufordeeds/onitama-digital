@@ -219,6 +219,13 @@ interface GameRoom {
 
 ## Technical Considerations
 
+### Bug Fixes & Improvements
+
+-   [x] Fix piece capturing functionality in Board.tsx
+-   [ ] Improve move highlighting for better visibility
+-   [ ] Enhance animation feedback for captures
+-   [ ] Optimize touch response for smoother gameplay
+
 ### State Management
 
 -   Use React Context for local game state

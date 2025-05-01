@@ -27,16 +27,16 @@ const Board: React.FC<BoardProps> = ({ onPieceSelect, onPositionSelect }) => {
 	const handleCellPress = (position: Position) => {
 		const piece = board[position.y][position.x];
 
-		// If there's a piece at this position, select it
-		if (piece) {
-			onPieceSelect?.(piece);
-			return;
-		}
-
-		// If this is a valid move position, move the selected piece
+		// Check if this is a valid move position (including capturing an opponent's piece)
 		if (isValidMovePosition(gameState, position)) {
 			movePieceToPosition(position);
 			onPositionSelect?.(position);
+			return;
+		}
+
+		// If there's a piece at this position and it's not a valid move, select it
+		if (piece) {
+			onPieceSelect?.(piece);
 			return;
 		}
 	};
