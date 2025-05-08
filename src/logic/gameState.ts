@@ -202,6 +202,18 @@ export const movePiece = (
 		return null;
 	}
 
+	// Check if we're capturing an opponent's master BEFORE updating the board
+	let gameStatus: 'playing' | 'blue_won' | 'red_won' = 'playing';
+	const targetPiece = gameState.board[targetPosition.y][targetPosition.x];
+	if (
+		targetPiece &&
+		targetPiece.player !== currentPlayer &&
+		targetPiece.type === 'master'
+	) {
+		// Master captured, set game status
+		gameStatus = currentPlayer === 'blue' ? 'blue_won' : 'red_won';
+	}
+
 	// Create a deep copy of the board
 	const newBoard = gameState.board.map((row) => [...row]);
 
@@ -239,13 +251,16 @@ export const movePiece = (
 		newCenterCard = selectedCard;
 	}
 
-	// Check for win conditions
-	const gameStatus = checkWinCondition(
-		newBoard,
-		updatedPiece,
-		targetPosition,
-		currentPlayer
-	);
+	// If we haven't already won by capturing a master, check for temple win condition
+	if (gameStatus === 'playing') {
+		const templeWin = checkWinCondition(
+			newBoard,
+			updatedPiece,
+			targetPosition,
+			currentPlayer
+		);
+		gameStatus = templeWin;
+	}
 
 	// Switch to the other player's turn
 	const nextPlayer = currentPlayer === 'blue' ? 'red' : 'blue';
@@ -266,7 +281,7 @@ export const movePiece = (
 };
 
 /**
- * Checks if the game has been won
+ * Checks if the game has been won by moving a master to the opponent's temple
  * @param board The current board state
  * @param movedPiece The piece that was just moved
  * @param targetPosition The position the piece moved to
@@ -279,17 +294,7 @@ export const checkWinCondition = (
 	targetPosition: Position,
 	currentPlayer: PlayerColor
 ): 'playing' | 'blue_won' | 'red_won' => {
-	// Win condition 1: Capture opponent's master
-	const capturedPiece = board[targetPosition.y][targetPosition.x];
-	if (
-		capturedPiece &&
-		capturedPiece.player !== currentPlayer &&
-		capturedPiece.type === 'master'
-	) {
-		return currentPlayer === 'blue' ? 'blue_won' : 'red_won';
-	}
-
-	// Win condition 2: Move master to opponent's temple
+	// Win condition: Move master to opponent's temple
 	if (movedPiece.type === 'master') {
 		const opponentTemple =
 			currentPlayer === 'blue'
